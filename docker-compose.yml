@@ -110,11 +110,100 @@ services:
       - ./gitea/repo:/repo
     depends_on:
       - gitea
-    # Idle by default; run ad-hoc git commands against it, e.g.:
-    #   docker-compose run --rm git-client clone http://gitea:3000/waynelee/some-repo.git
     entrypoint: ["tail", "-f", "/dev/null"]
+
+  # ==========================================
+  # SonarQube Services
+  # ==========================================
+
+  sonarqube-db:
+    image: postgres:15-alpine
+    container_name: sonarqube-db
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: sonarpassword
+      POSTGRES_DB: sonarqube
+    volumes:
+      - sonarqube-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar -d sonarqube"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  sonarqube:
+    image: sonarqube:lts-community
+    container_name: sonarqube-server
+    environment:
+      - SONAR_JDBC_URL=jdbc:postgresql://sonarqube-db:5432/sonarqube
+      - SONAR_JDBC_USERNAME=sonar
+      - SONAR_JDBC_PASSWORD=sonarpassword
+    volumes:
+      - sonarqube-data:/opt/sonarqube/data
+      - sonarqube-extensions:/opt/sonarqube/extensions
+      - sonarqube-logs:/opt/sonarqube/logs
+    depends_on:
+      sonarqube-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:9000/api/system/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  sonarqube-init:
+    image: curlimages/curl:latest
+    container_name: sonarqube-init
+    depends_on:
+      sonarqube:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+        echo 'Updating SonarQube default admin password...' &&
+        curl -s -u admin:admin -X POST 'http://sonarqube:9000/api/users/change_password?login=admin&previousPassword=admin&password=2400968@SIT.singaporetech.edu.sg' &&
+        echo 'SonarQube admin password successfully updated!'
+      "
+
+  sonarqube-proxy:
+    image: nginx:alpine
+    container_name: sonarqube-ssl-proxy
+    ports:
+      - "9000:9000"
+    depends_on:
+      sonarqube:
+        condition: service_healthy
+    command: >
+      sh -c "
+        mkdir -p /etc/nginx/certs &&
+        if [ ! -f /etc/nginx/certs/cert.pem ]; then
+          apk add --no-cache openssl &&
+          openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout /etc/nginx/certs/key.pem \
+            -out /etc/nginx/certs/cert.pem \
+            -subj '/CN=127.0.0.1';
+        fi &&
+        echo 'server {
+            listen 9000 ssl;
+            server_name 127.0.0.1 localhost;
+            ssl_certificate /etc/nginx/certs/cert.pem;
+            ssl_certificate_key /etc/nginx/certs/key.pem;
+            location / {
+                proxy_pass http://sonarqube:9000;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+            }
+        }' > /etc/nginx/conf.d/default.conf &&
+        nginx -g 'daemon off;'
+      "
 
 volumes:
   db-data:
   gitea-data:
   gitea-db-data:
+  sonarqube-db-data:
+  sonarqube-data:
+  sonarqube-extensions:
+  sonarqube-logs:
