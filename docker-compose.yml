@@ -1,0 +1,120 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: auth-db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: appdb
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./100k.txt:/data/100k.txt
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d appdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web-app:
+    build: .
+    container_name: auth-web
+    environment:
+      - DB_HOST=db
+      - DB_USER=admin
+      - DB_PASS=secretpassword
+      - DB_NAME=appdb
+    depends_on:
+      db:
+        condition: service_healthy
+
+  nginx-proxy:
+    build: ./nginx
+    container_name: secure-web-server
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - ADMIN_USER=admin
+      - ADMIN_PASS=2400968@SIT.singaporetech.edu.sg
+    depends_on:
+      - web-app
+
+  gitea-db:
+    image: postgres:15-alpine
+    container_name: gitea-db
+    environment:
+      POSTGRES_USER: gitea
+      POSTGRES_PASSWORD: giteasecret
+      POSTGRES_DB: gitea
+    volumes:
+      - gitea-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gitea -d gitea"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  gitea:
+    image: gitea/gitea:1.22
+    container_name: gitea-server
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__database__DB_TYPE=postgres
+      - GITEA__database__HOST=gitea-db:5432
+      - GITEA__database__NAME=gitea
+      - GITEA__database__USER=gitea
+      - GITEA__database__PASSWD=giteasecret
+      - GITEA__server__ROOT_URL=http://localhost:3300/
+      - GITEA__server__HTTP_PORT=3000
+      - GITEA__server__DOMAIN=localhost
+      - GITEA__server__SSH_DOMAIN=localhost
+      - GITEA__security__INSTALL_LOCK=true
+    volumes:
+      - gitea-data:/data
+    ports:
+      - "3300:3000"   # web UI: http://localhost:3300
+      - "2222:22"     # git over SSH
+    depends_on:
+      gitea-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3000/api/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  gitea-init:
+    image: gitea/gitea:1.22
+    container_name: gitea-init
+    entrypoint: ["/bin/sh", "/init/create-user.sh"]
+    volumes:
+      - gitea-data:/data
+      - ./gitea/create-user.sh:/init/create-user.sh
+    networks:
+      - default
+    depends_on:
+      gitea:
+        condition: service_healthy
+
+  git-client:
+    build:
+      context: ./gitea
+      dockerfile: git-client.Dockerfile
+    container_name: git-client
+    volumes:
+      - ./gitea/repo:/repo
+    depends_on:
+      - gitea
+    # Idle by default; run ad-hoc git commands against it, e.g.:
+    #   docker-compose run --rm git-client clone http://gitea:3000/waynelee/some-repo.git
+    entrypoint: ["tail", "-f", "/dev/null"]
+
+volumes:
+  db-data:
+  gitea-data:
+  gitea-db-data:

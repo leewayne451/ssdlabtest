@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head><title>Welcome</title></head>
+<body>
+    <h2>Welcome! Account Created Successfully.</h2>
+    <p>Your password is: <strong id="displayPass"></strong></p>
+    
+    <button onclick="logout()">Logout</button>
+
+    <script>
+        // Retrieve password from URL query string
+        const urlParams = new URLSearchParams(window.location.search);
+        const pwd = urlParams.get('pwd');
+        
+        if (pwd) {
+            document.getElementById('displayPass').innerText = pwd;
+        } else {
+            document.getElementById('displayPass').innerText = "[No password provided]";
+        }
+
+        function logout() {
+            // Clear the URL and return to home screen
+            window.location.href = '/index.html';
+        }
+    </script>
+</body>
+</html>

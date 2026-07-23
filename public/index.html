@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head><title>Home & Account Creation</title></head>
+<body>
+    <h2>Account Creation / Login</h2>
+    <form id="authForm">
+        <label>Username:</label><br>
+        <input type="text" id="username" required><br><br>
+        
+        <label>Password:</label><br>
+        <input type="password" id="password" required><br><br>
+        
+        <button type="submit" id="loginBtn">Login / Create Account</button>
+    </form>
+    <p id="errorMsg" style="color:red;"></p>
+
+    <script>
+        // FRONTEND: OWASP ASVS V2.1 Level 1 Password Verification
+        function verifyPasswordFrontend(password) {
+            if (password.length < 8) return "Password must be at least 8 characters.";
+            if (password.length > 64) return "Password cannot exceed 64 characters.";
+            return null; // Passes local checks, defer to backend for dictionary check
+        }
+
+        document.getElementById('authForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+            const errorMsg = document.getElementById('errorMsg');
+
+            // 1. Frontend Check
+            const frontendError = verifyPasswordFrontend(pass);
+            if (frontendError) {
+                errorMsg.innerText = frontendError;
+                return; // Remains on home page
+            }
+
+            // 2. Backend Check & Account Creation
+            const response = await fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: user, password: pass })
+            });
+
+            const data = await response.json();
+
+            if (!data.success) {
+                errorMsg.innerText = data.message; // Remains on home page showing error
+            } else {
+                // If meets requirements, go to welcome page displaying password
+                window.location.href = '/welcome.html?pwd=' + encodeURIComponent(pass);
+            }
+        });
+    </script>
+</body>
+</html>
